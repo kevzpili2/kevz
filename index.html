@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="img/igni.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ignisense: Fire Command & Control</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Tailwind Configuration -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Chakra Petch', 'sans-serif'],
+                    },
+                    colors: {
+                        danger: {
+                            50: '#fef2f2', 100: '#fee2e2', 500: '#ef4444',
+                            600: '#dc2626', 700: '#b91c1c', 800: '#991b1b',
+                            900: '#7f1d1d', 950: '#450a0a',
+                        }
+                    },
+                    boxShadow: {
+                        'glow': '0 0 20px rgba(220, 38, 38, 0.5)',
+                        'glow-sm': '0 0 10px rgba(220, 38, 38, 0.3)',
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'scan': 'scan 4s linear infinite',
+                    },
+                    keyframes: {
+                        scan: {
+                            '0%': { transform: 'translateY(-100%)' },
+                            '100%': { transform: 'translateY(500px)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Global Styles */
+        body { 
+            background-color: #020101; 
+            background-image: 
+                radial-gradient(circle at 50% 0%, #1a0505 0%, transparent 50%),
+                radial-gradient(circle at 0% 100%, #1f0505 0%, transparent 30%);
+            color: #e2e8f0; 
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* Views Logic */
+        .view-section { display: none; height: 100vh; width: 100vw; overflow: hidden; }
+        .view-section.active { display: flex; animation: fadeIn 0.5s ease-out; }
+        .view-section.scrollable { overflow-y: auto; height: 100vh; display: none; }
+        .view-section.scrollable.active { display: block; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* UI Elements */
+        .scanlines {
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+            background-size: 100% 4px;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 9999; opacity: 0.2;
+        }
+        
+        .glass-panel {
+            background: rgba(10, 5, 5, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f0505; }
+        ::-webkit-scrollbar-thumb { background: #450a0a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #7f1d1d; }
+
+        /* Map & Leaflet Customization */
+        .map-container { 
+            height: 100%; width: 100%; 
+            border-radius: 0.75rem; 
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        .leaflet-layer, .leaflet-control-zoom-in, .leaflet-control-zoom-out, .leaflet-control-attribution {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+
+        /* Input Groups */
+        .input-group:focus-within label { color: #ef4444; }
+        .input-group:focus-within i { color: #ef4444; }
+
+        /* Search Results */
+        #search-results {
+            position: absolute; top: 100%; left: 0; width: 100%;
+            background-color: rgba(10, 5, 5, 0.95);
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            border-radius: 0.5rem; max-height: 200px; overflow-y: auto;
+            z-index: 1000; margin-top: 0.25rem; backdrop-filter: blur(10px);
+        }
+        .search-item {
+            padding: 0.75rem 1rem; cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: #d1d5db; font-size: 0.875rem;
+        }
+        .search-item:hover { background-color: rgba(220, 38, 38, 0.2); color: white; }
+
+        /* Feature Card */
+        .feature-card {
+            background: rgba(20, 10, 10, 0.6);
+            border: 1px solid rgba(220, 38, 38, 0.1);
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            border-color: rgba(220, 38, 38, 0.4);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(220, 38, 38, 0.1);
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="scanlines"></div>
+
+    <!-- ============================================ -->
+    <!-- VIEW: LOGIN -->
+    <!-- ============================================ -->
+    <section id="view-login" class="view-section active flex-col md:flex-row">
+        <!-- Left Panel -->
+        <div class="relative w-full md:w-1/2 lg:w-[55%] h-32 md:h-full bg-neutral-950 overflow-hidden flex flex-col items-center justify-center p-8 border-b md:border-b-0 md:border-r border-red-900/30">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-black to-black"></div>
+            <canvas id="bg-canvas" class="absolute top-0 left-0 w-full h-full opacity-40"></canvas>
+            
+            <div class="relative z-10 flex flex-col items-center text-center">
+                <div class="w-32 h-32 md:w-48 md:h-48 mb-6 relative group cursor-default">
+                    <div class="absolute inset-0 rounded-full border-2 border-red-600/30 border-dashed animate-[spin_10s_linear_infinite]"></div>
+                    <div class="absolute inset-4 rounded-full bg-red-600/10 blur-xl group-hover:bg-red-600/20 transition-all duration-500"></div>
+                    <div class="absolute inset-2 bg-gradient-to-br from-neutral-900 to-black rounded-full border border-red-500/50 flex items-center justify-center shadow-[0_0_30px_rgba(220,38,38,0.3)]">
+                        <i data-lucide="flame" class="w-16 h-16 md:w-24 md:h-24 text-red-600 drop-shadow-[0_0_10px_rgba(220,38,38,0.8)]"></i>
+                    </div>
+                </div>
+                <h1 class="text-3xl md:text-5xl font-display font-bold text-white tracking-wider mb-2">IGNISENSE</h1>
+                <p class="text-red-500/80 font-mono text-xs md:text-sm tracking-[0.3em] uppercase">Fire Command & Control</p>
+            </div>
+            <div class="absolute bottom-8 text-center hidden md:block">
+                <p class="text-[10px] text-gray-600 font-mono">AUTHORIZED PERSONNEL ONLY • SECURE CONNECTION</p>
+            </div>
+        </div>
+
+        <!-- Right Panel (Form) -->
+        <div class="w-full md:w-1/2 lg:w-[45%] h-full bg-[#050202] flex items-center justify-center p-6 relative">
+             <!-- Corner Accents -->
+             <div class="absolute top-0 right-0 p-8 opacity-20 hidden md:block">
+                <i data-lucide="shield-check" class="w-24 h-24 text-red-900"></i>
+            </div>
+
+            <div class="w-full max-w-sm z-20">
+                <!-- LOGO PLACEHOLDER -->
+                <div class="flex justify-center mb-8">
+                    <div class="relative w-24 h-24 group">
+                        <div class="absolute inset-0 bg-red-600/20 blur-xl rounded-full opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                        <!-- Use onerror to handle missing local image in preview -->
+                        <img src="img/tcc.png" onerror="this.src='https://placehold.co/100x100/000000/FFF?text=LOGO'" alt="Company Logo" class="relative w-full h-full object-contain rounded-xl border border-red-500/30 bg-black/50 p-1 hover:border-red-500/60 transition-all shadow-lg shadow-red-900/10">
+                    </div>
+                </div>
+
+                <div class="mb-10">
+                    <h2 class="text-2xl font-display font-semibold text-white mb-2 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-red-600 rounded-sm"></span> System Access
+                    </h2>
+                    <p class="text-gray-500 text-sm">Offline Local Environment Mode.</p>
+                    <p class="text-xs text-red-900 mt-1">Default Admin: admin@ignisense.ph / admin123</p>
+                </div>
+
+                <div id="login-error" class="hidden bg-red-950/30 border-l-4 border-red-600 p-4 mb-6 backdrop-blur-sm">
+                    <p class="text-red-200 text-sm font-medium">Invalid credentials.</p>
+                </div>
+
+                <form id="login-form" class="space-y-6">
+                    <div class="input-group space-y-2">
+                        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Email Address</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i data-lucide="mail" class="h-5 w-5 text-gray-600"></i>
+                            </div>
+                            <input type="email" id="login-email" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-red-600 placeholder-gray-700 font-mono text-sm" placeholder="user@example.com">
+                        </div>
+                    </div>
+                    <div class="input-group space-y-2">
+                        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Password</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <i data-lucide="lock" class="h-5 w-5 text-gray-600"></i>
+                            </div>
+                            <input type="password" id="login-pass" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-red-600 placeholder-gray-700 font-mono text-sm" placeholder="••••••••">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-red-700 hover:bg-red-600 text-white font-display font-bold py-4 px-4 rounded-lg transition-all shadow-glow hover:shadow-[0_0_30px_rgba(220,38,38,0.4)] flex justify-center gap-2">
+                        SIGN IN <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                    </button>
+                    <div class="text-center pt-4 border-t border-white/5">
+                        <p class="text-gray-500 text-sm">Don't have an account? <a href="#" onclick="app.router.navigate('register')" class="text-red-400 hover:text-red-300 font-semibold">Register here</a></p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- VIEW: REGISTER -->
+    <!-- ============================================ -->
+    <section id="view-register" class="view-section flex-col md:flex-row">
+        <!-- Same Left Panel Reuse (Visual consistency) -->
+        <div class="relative w-full md:w-1/2 lg:w-[55%] h-32 md:h-full bg-neutral-950 overflow-hidden flex flex-col items-center justify-center p-8 border-b md:border-b-0 md:border-r border-red-900/30">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-black to-black"></div>
+            <!-- Reusing canvas logic but we'll need a way to target it if we want animation on both pages, simple way is cloning logic or just having it on one main view. For now, visual consistency via CSS. -->
+            <div class="relative z-10 text-center">
+                <i data-lucide="shield-plus" class="w-24 h-24 text-red-600 mx-auto mb-4"></i>
+                <h1 class="text-3xl md:text-5xl font-display font-bold text-white tracking-wider">NEW OPERATIVE</h1>
+                <p class="text-red-500/80 font-mono text-xs md:text-sm tracking-[0.3em] uppercase mt-2">Join the Network</p>
+            </div>
+        </div>
+
+        <div class="w-full md:w-1/2 lg:w-[45%] h-full bg-[#050202] flex items-center justify-center p-6 overflow-y-auto relative">
+            <div class="absolute top-0 right-0 p-8 opacity-20 hidden md:block">
+                <i data-lucide="user-plus" class="w-24 h-24 text-red-900"></i>
+            </div>
+            
+            <div class="w-full max-w-sm z-20 py-8">
+                 <!-- LOGO PLACEHOLDER -->
+                 <div class="flex justify-center mb-8">
+                    <div class="relative w-24 h-24 group">
+                        <div class="absolute inset-0 bg-red-600/20 blur-xl rounded-full opacity-50 group-hover:opacity-80 transition-opacity"></div>
+                        <img src="img/igni.png" onerror="this.src='https://placehold.co/100x100/000000/FFF?text=LOGO'" alt="Company Logo" class="relative w-full h-full object-contain rounded-xl border border-red-500/30 bg-black/50 p-1 hover:border-red-500/60 transition-all shadow-lg shadow-red-900/10">
+                    </div>
+                </div>
+
+                <div class="mb-8">
+                    <h2 class="text-2xl font-display font-semibold text-white mb-2"><span class="w-2 h-6 bg-red-600 rounded-sm inline-block mr-2"></span>Registration</h2>
+                    <p class="text-gray-500 text-sm">Create credentials for system access.</p>
+                </div>
+
+                <div id="reg-error" class="hidden bg-red-950/30 border-l-4 border-red-600 p-4 mb-6"><p class="text-red-200 text-sm font-medium" id="reg-error-msg"></p></div>
+
+                <form id="register-form" class="space-y-4">
+                    <div class="input-group">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Full Name</label>
+                        <div class="relative">
+                            <i data-lucide="user" class="absolute left-3 top-3 h-5 w-5 text-gray-600"></i>
+                            <input type="text" id="reg-name" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:border-red-600 font-mono text-sm">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Email</label>
+                        <div class="relative">
+                            <i data-lucide="mail" class="absolute left-3 top-3 h-5 w-5 text-gray-600"></i>
+                            <input type="email" id="reg-email" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:border-red-600 font-mono text-sm">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Password</label>
+                        <div class="relative">
+                            <i data-lucide="lock" class="absolute left-3 top-3 h-5 w-5 text-gray-600"></i>
+                            <input type="password" id="reg-pass" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:border-red-600 font-mono text-sm">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Confirm Password</label>
+                        <div class="relative">
+                            <i data-lucide="check-circle" class="absolute left-3 top-3 h-5 w-5 text-gray-600"></i>
+                            <input type="password" id="reg-confirm" required class="w-full bg-neutral-900/50 text-white border border-gray-800 rounded-lg pl-10 pr-4 py-3 focus:border-red-600 font-mono text-sm">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-red-700 hover:bg-red-600 text-white font-display font-bold py-4 px-4 rounded-lg mt-2 shadow-glow">CREATE ACCOUNT</button>
+                    <div class="text-center pt-4 border-t border-white/5">
+                        <p class="text-gray-500 text-sm">Already authorized? <a href="#" onclick="app.router.navigate('login')" class="text-red-400 font-semibold">Login</a></p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- VIEW: ADMIN DASHBOARD -->
+    <!-- ============================================ -->
+    <section id="view-admin" class="view-section flex-row">
+        <!-- Sidebar -->
+        <aside class="w-72 glass-panel border-r border-red-900/20 hidden md:flex flex-col z-50">
+            <div class="p-8 border-b border-white/5 relative">
+                 <!-- Decorative glow -->
+                 <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-600 to-transparent opacity-50"></div>
+                <h1 class="text-2xl font-display font-bold text-white flex items-center gap-3">
+                    <i data-lucide="shield-alert" class="text-red-600"></i> ADMIN
+                </h1>
+                <p class="text-[10px] text-gray-500 uppercase tracking-[0.2em] mt-1 pl-1">Ignisense Systems</p>
+            </div>
+            <nav class="flex-1 p-4 space-y-1">
+                <p class="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2 mt-4">Monitoring</p>
+                <button onclick="app.admin.switchTab('dashboard')" id="admin-tab-dashboard" class="w-full flex items-center gap-3 text-red-400 bg-red-900/10 border-l-2 border-red-500 px-4 py-3 rounded-r-lg text-sm font-medium">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+                </button>
+                <p class="px-4 text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2 mt-6">Administration</p>
+                <button onclick="app.admin.switchTab('users')" id="admin-tab-users" class="w-full flex items-center gap-3 text-gray-400 hover:text-white px-4 py-3 rounded-r-lg text-sm font-medium">
+                    <i data-lucide="users" class="w-4 h-4"></i> User Database
+                </button>
+            </nav>
+            <div class="p-4 border-t border-white/5">
+                <button onclick="app.auth.logout()" class="flex items-center gap-3 text-red-500/70 hover:text-red-500 w-full px-4 py-3 rounded-lg text-sm font-semibold">
+                    <i data-lucide="log-out" class="w-4 h-4"></i> Terminate Session
+                </button>
+            </div>
+        </aside>
+
+        <!-- Content -->
+        <main class="flex-1 overflow-y-auto relative flex flex-col h-full">
+            <header class="sticky top-0 z-40 glass-panel border-b border-red-900/20 px-8 py-4 flex justify-between items-center">
+                <div>
+                    <h2 class="text-2xl font-display font-bold text-white tracking-wide">Command Center</h2>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        <span class="text-[10px] text-gray-400 uppercase">Tanauan Sector Net: <span class="text-green-500 font-mono">ONLINE</span></span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="p-6 md:p-8 flex-1">
+                <!-- Admin: Dashboard Tab -->
+                <div id="admin-view-dashboard" class="admin-subview">
+                    <!-- Stats -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div class="bg-gradient-to-br from-neutral-900 to-black p-6 rounded-xl border border-white/5 relative overflow-hidden">
+                            <p class="text-gray-500 text-xs uppercase tracking-widest font-bold">Total Incidents</p>
+                            <p id="stat-total" class="text-5xl font-display font-bold text-white mt-2">0</p>
+                        </div>
+                        <div class="bg-gradient-to-br from-neutral-900 to-black p-6 rounded-xl border border-white/5 border-l-4 border-l-amber-600">
+                            <p class="text-amber-600/70 text-xs uppercase tracking-widest font-bold">Civilian Reports</p>
+                            <p id="stat-user" class="text-5xl font-display font-bold text-amber-500 mt-2">0</p>
+                        </div>
+                        <div class="bg-gradient-to-br from-neutral-900 to-black p-6 rounded-xl border border-white/5 border-l-4 border-l-red-600">
+                            <p class="text-red-600/70 text-xs uppercase tracking-widest font-bold">System Alerts</p>
+                            <p id="stat-system" class="text-5xl font-display font-bold text-red-500 mt-2 text-shadow-glow">0</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[600px]">
+                        <div class="lg:col-span-2 relative p-1 rounded-xl bg-gray-900 border border-gray-700/50 flex flex-col">
+                            <div id="admin-map" class="map-container bg-neutral-900 flex-1"></div>
+                            <div class="absolute top-4 right-4 z-[400] bg-black/80 backdrop-blur border border-red-900/50 px-3 py-1 text-[10px] font-mono text-red-400">
+                                <span class="animate-pulse">●</span> LIVE FEED
+                            </div>
+                        </div>
+                        <div class="flex flex-col h-full bg-neutral-900/50 border border-white/5 rounded-xl overflow-hidden">
+                            <div class="p-3 border-b border-white/5"><h3 class="font-bold text-white text-sm">Incoming Feed</h3></div>
+                            <div id="admin-report-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+                                <!-- List items -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin: Users Tab -->
+                <div id="admin-view-users" class="admin-subview hidden">
+                    <div class="bg-neutral-900/80 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
+                        <div class="p-6 border-b border-white/5 flex justify-between items-center bg-black/40">
+                            <h3 class="text-xl font-display font-bold text-white">Personnel Database</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm text-gray-400">
+                                <thead class="bg-red-950/20 text-red-200/80 uppercase text-xs font-display">
+                                    <tr><th class="px-6 py-4">Identity</th><th class="px-6 py-4">Contact</th><th class="px-6 py-4">Role</th><th class="px-6 py-4 text-right">Actions</th></tr>
+                                </thead>
+                                <tbody id="admin-users-list" class="divide-y divide-white/5"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </section>
+
+    <!-- ============================================ -->
+    <!-- VIEW: USER DASHBOARD -->
+    <!-- ============================================ -->
+    <section id="view-user" class="view-section scrollable flex-col">
+        <!-- Header -->
+        <header class="fixed top-0 left-0 right-0 z-50 glass-panel border-b border-red-900/30">
+            <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+                <a href="#" class="text-2xl font-display font-bold text-white flex items-center gap-3 tracking-wider group">
+                    <i data-lucide="flame" class="text-red-500 w-8 h-8"></i>
+                    IGNISENSE <span class="text-xs px-2 py-0.5 rounded bg-red-900/50 text-red-200 border border-red-800/50 font-sans font-normal">TANAUAN</span>
+                </a>
+                <div class="flex items-center gap-6">
+                    <div class="hidden md:flex flex-col items-end">
+                        <span class="text-gray-400 text-xs uppercase tracking-widest">Operator</span>
+                        <span class="text-white font-semibold text-sm" id="user-name-display">Guest</span>
+                    </div>
+                    <button onclick="app.auth.logout()" class="text-gray-400 hover:text-white"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+                </div>
+            </div>
+        </header>
+
+        <main class="pt-28 pb-12 px-4 md:px-6 container mx-auto max-w-7xl h-full flex flex-col">
+            <div class="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+                <div>
+                    <h1 class="text-3xl md:text-4xl font-display font-bold text-white mb-2 flex items-center gap-3"><span class="w-3 h-8 bg-red-600 rounded-sm inline-block shadow-glow"></span>Status Overview</h1>
+                    <p class="text-gray-500">Live monitoring of fire incidents within Tanauan City.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="flex h-3 w-3 relative"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span></span>
+                    <span class="text-red-500 font-mono text-sm tracking-wider">SYSTEM ONLINE</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-24 flex-1">
+                <div class="lg:col-span-8 relative flex flex-col">
+                    <!-- Search -->
+                    <div class="relative z-20 mb-2">
+                        <div class="flex items-center bg-neutral-900 border border-red-900/30 rounded-lg shadow-lg">
+                            <i data-lucide="search" class="ml-3 text-gray-400 w-5 h-5"></i>
+                            <input type="text" id="map-search" placeholder="Search location..." class="w-full bg-transparent text-white px-4 py-3 focus:outline-none placeholder-gray-500 text-sm font-mono" autocomplete="off">
+                            <button onclick="app.user.search()" class="bg-red-900/30 text-red-400 px-4 py-2 m-1 rounded text-xs font-bold uppercase">Locate</button>
+                        </div>
+                        <div id="search-results" class="hidden"></div>
+                    </div>
+                    <!-- Map -->
+                    <div class="relative group flex-1 min-h-[500px]">
+                        <div id="user-map" class="map-container bg-neutral-900"></div>
+                        <div class="absolute bottom-4 left-4 z-[400] bg-black/80 backdrop-blur-md px-4 py-2 border-l-4 border-red-600 rounded-r text-xs font-mono text-gray-300">COORD: TANAUAN_SEC_01</div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-4 flex flex-col gap-6">
+                    <div class="bg-[#0A0505] rounded-xl p-6 border border-neutral-800 shadow-xl relative overflow-hidden">
+                        <div class="absolute -right-10 -top-10 w-32 h-32 bg-red-900/20 blur-3xl rounded-full pointer-events-none"></div>
+                        <h2 class="text-xl font-display font-bold text-white mb-6 flex items-center gap-2 border-b border-white/5 pb-4">
+                            <i data-lucide="siren" class="text-red-500 animate-pulse"></i> Emergency Report
+                        </h2>
+                        
+                        <div class="space-y-6">
+                            <div class="bg-neutral-900/50 p-4 rounded-lg border border-red-900/20">
+                                <div class="flex justify-between items-center mb-2">
+                                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Target Location</p>
+                                    <i data-lucide="crosshair" class="w-4 h-4 text-red-600"></i>
+                                </div>
+                                <p id="lat-lng-display" class="text-white font-mono text-lg tracking-tight">- - . - - , - - . - -</p>
+                            </div>
+
+                            <div class="bg-neutral-900/50 p-4 rounded-lg border border-red-900/20">
+                                <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-3">Fire Intensity Level</p>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <button onclick="app.user.setIntensity('low')" id="int-low" class="intensity-btn py-2 rounded text-xs font-bold border border-green-900/30 bg-green-900/10 text-green-500 opacity-50 hover:opacity-100">LOW</button>
+                                    <button onclick="app.user.setIntensity('medium')" id="int-med" class="intensity-btn py-2 rounded text-xs font-bold border border-orange-900/30 bg-orange-900/10 text-orange-500 opacity-50 hover:opacity-100">MEDIUM</button>
+                                    <button onclick="app.user.setIntensity('high')" id="int-high" class="intensity-btn py-2 rounded text-xs font-bold border border-red-900/30 bg-red-900/10 text-red-500 opacity-50 hover:opacity-100">HIGH</button>
+                                </div>
+                            </div>
+
+                            <button id="submit-btn" disabled onclick="app.user.submitReport()" class="w-full bg-red-700 p-4 rounded-xl text-white font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-600 transition-colors flex justify-center gap-2">
+                                <i data-lucide="send" class="w-4 h-4"></i> Transmit Alert
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESTORED SECTIONS FROM USER_HOME.PHP -->
+            <div class="border-t border-red-900/20 pt-16 mt-12">
+                
+                <!-- Intro / About Section -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-12 mb-20">
+                    <div>
+                        <h2 class="text-2xl md:text-3xl font-display font-bold text-white mb-4 flex items-center gap-3">
+                            <span class="w-2 h-6 bg-red-600 rounded-sm"></span>
+                            System Overview
+                        </h2>
+                        <p class="text-gray-400 leading-relaxed mb-6">
+                            Ignisense leverages photonic-based early detection to revolutionize fire safety in Tanauan City. By analyzing light spectra at the moment of ignition, we provide instantaneous alerts to users and authorities, drastically reducing response times.
+                        </p>
+                        <p class="text-gray-500 text-sm">
+                            Mission: To enhance public safety through affordable, reliable, and high-speed detection technology integrated seamlessly with local emergency services.
+                        </p>
+                    </div>
+                    <div class="bg-neutral-900/50 rounded-xl border border-red-900/20 p-6 flex flex-col justify-center">
+                        <div class="flex items-start gap-4 mb-4">
+                            <div class="bg-red-500/10 p-3 rounded-lg"><i data-lucide="zap" class="w-6 h-6 text-red-500"></i></div>
+                            <div>
+                                <h3 class="font-display font-bold text-white">Photonic Detection</h3>
+                                <p class="text-sm text-gray-500">Analyzes light signatures instantly.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="bg-red-500/10 p-3 rounded-lg"><i data-lucide="shield-check" class="w-6 h-6 text-red-500"></i></div>
+                            <div>
+                                <h3 class="font-display font-bold text-white">False Alarm Filtration</h3>
+                                <p class="text-sm text-gray-500">Ignores non-fire triggers like dust or steam.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Features Section -->
+                <div class="mb-20">
+                    <div class="text-center mb-10">
+                        <h2 class="text-2xl md:text-3xl font-display font-bold text-white mb-2">Core Capabilities</h2>
+                        <p class="text-gray-500">Advanced component breakdown.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <!-- Feature 1 -->
+                        <div class="feature-card p-6 rounded-xl text-center">
+                            <div class="inline-block bg-neutral-900 p-4 rounded-full mb-4 border border-red-900/30 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                                <i data-lucide="scan-eye" class="w-8 h-8 text-red-500"></i>
+                            </div>
+                            <h3 class="text-lg font-display font-bold text-white mb-2">Multi-Spectral</h3>
+                            <p class="text-xs text-gray-400">Detects unique light signatures of flames with high precision.</p>
+                        </div>
+                        <!-- Feature 2 -->
+                        <div class="feature-card p-6 rounded-xl text-center">
+                            <div class="inline-block bg-neutral-900 p-4 rounded-full mb-4 border border-red-900/30 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                                <i data-lucide="cpu" class="w-8 h-8 text-red-500"></i>
+                            </div>
+                            <h3 class="text-lg font-display font-bold text-white mb-2">Smart Analysis</h3>
+                            <p class="text-xs text-gray-400">Onboard microcontroller processes data in milliseconds.</p>
+                        </div>
+                        <!-- Feature 3 -->
+                        <div class="feature-card p-6 rounded-xl text-center">
+                            <div class="inline-block bg-neutral-900 p-4 rounded-full mb-4 border border-red-900/30 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                                <i data-lucide="radio" class="w-8 h-8 text-red-500"></i>
+                            </div>
+                            <h3 class="text-lg font-display font-bold text-white mb-2">Instant Alert</h3>
+                            <p class="text-xs text-gray-400">Real-time notification to command center and owners.</p>
+                        </div>
+                        <!-- Feature 4 -->
+                        <div class="feature-card p-6 rounded-xl text-center">
+                            <div class="inline-block bg-neutral-900 p-4 rounded-full mb-4 border border-red-900/30 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                                <i data-lucide="globe" class="w-8 h-8 text-red-500"></i>
+                            </div>
+                            <h3 class="text-lg font-display font-bold text-white mb-2">GPS Pinpoint</h3>
+                            <p class="text-xs text-gray-400">Exact coordinates provided to first responders.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Emergency Hotlines -->
+                <div class="mb-12">
+                    <div class="bg-gradient-to-r from-red-900/20 via-neutral-900 to-red-900/20 border border-red-900/30 rounded-2xl p-8 relative overflow-hidden">
+                        <!-- BG Pattern -->
+                        <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#dc2626_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                        
+                        <div class="relative z-10">
+                            <h2 class="text-2xl font-display font-bold text-white mb-8 text-center flex items-center justify-center gap-3">
+                                <i data-lucide="phone-call" class="text-red-500"></i> Emergency Hotlines (Tanauan)
+                            </h2>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div class="bg-black/40 border border-red-500/20 p-6 rounded-xl text-center hover:border-red-500/50 transition-colors">
+                                    <p class="text-gray-500 text-xs uppercase tracking-widest mb-1">Fire Response</p>
+                                    <h3 class="text-lg font-bold text-white mb-2">BFP Tanauan</h3>
+                                    <p class="text-2xl font-mono text-red-500 font-bold">(043) 778-2111</p>
+                                </div>
+                                <div class="bg-black/40 border border-blue-500/20 p-6 rounded-xl text-center hover:border-blue-500/50 transition-colors">
+                                    <p class="text-gray-500 text-xs uppercase tracking-widest mb-1">Police Assistance</p>
+                                    <h3 class="text-lg font-bold text-white mb-2">PNP Tanauan</h3>
+                                    <p class="text-2xl font-mono text-blue-400 font-bold">(043) 778-1166</p>
+                                </div>
+                                <div class="bg-black/40 border border-green-500/20 p-6 rounded-xl text-center hover:border-green-500/50 transition-colors">
+                                    <p class="text-gray-500 text-xs uppercase tracking-widest mb-1">Disaster / Medical</p>
+                                    <h3 class="text-lg font-bold text-white mb-2">CDRRMO</h3>
+                                    <p class="text-2xl font-mono text-green-500 font-bold">(043) 706-7222</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <footer class="mt-12 border-t border-red-900/20 pt-8 text-center pb-8">
+                    <div class="flex flex-col md:flex-row justify-between items-center gap-4 text-gray-600 text-xs font-mono">
+                        <p>&copy; 2026 Ignisense Systems. Secure Access Terminal.</p>
+                        <div class="flex gap-4">
+                            <a href="#" class="hover:text-red-500 transition-colors">Privacy Protocol</a>
+                            <a href="#" class="hover:text-red-500 transition-colors">System Status</a>
+                            <a href="#" class="hover:text-red-500 transition-colors">Contact Admin</a>
+                        </div>
+                    </div>
+                </footer>
+
+            </div>
+        </main>
+    </section>
+
+    <!-- Custom Modal -->
+    <div id="modal-overlay" class="fixed inset-0 bg-black/90 backdrop-blur-md hidden z-[10000] flex items-center justify-center">
+        <div class="bg-[#0f0505] p-1 rounded-2xl border border-red-900/50 max-w-sm w-full relative">
+            <div id="modal-stripe" class="h-1 w-full bg-gradient-to-r from-red-600 to-red-600"></div>
+            <div class="p-8 text-center">
+                <div id="modal-icon" class="w-16 h-16 rounded-full bg-red-900/20 flex items-center justify-center mb-6 mx-auto border border-red-900/50">
+                    <i data-lucide="alert-triangle" class="text-red-500 w-8 h-8"></i>
+                </div>
+                <h3 id="modal-title" class="text-xl font-display font-bold text-white mb-2">TITLE</h3>
+                <p id="modal-msg" class="text-gray-400 mb-8 text-sm">Message</p>
+                <div id="modal-actions" class="flex justify-center gap-3">
+                    <button onclick="document.getElementById('modal-overlay').classList.add('hidden')" class="px-4 py-2 bg-gray-800 text-white rounded">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- DATA & STATE MANAGEMENT ---
+        const DB = {
+            init: () => {
+                // Seed Users
+                if(!localStorage.getItem('ignisense_users')) {
+                    const users = [
+                        { id: 1, name: 'System Admin', email: 'admin@ignisense.ph', password: 'admin123', role: 'admin', created_at: new Date().toISOString() },
+                        { id: 2, name: 'Jp User', email: 'jp@gmail.com', password: 'password', role: 'user', created_at: new Date().toISOString() }
+                    ];
+                    localStorage.setItem('ignisense_users', JSON.stringify(users));
+                }
+                // Seed Reports
+                if(!localStorage.getItem('ignisense_reports')) {
+                    const reports = [
+                        { id: 101, type: 'user', lat: 14.0855, lng: 121.1475, location_name: 'Tanauan City Center', intensity: 'low', created_at: new Date().toISOString() },
+                        { id: 102, type: 'system', lat: 14.1000, lng: 121.1500, location_name: 'Auto-Sensor: Brgy 1', intensity: 'high', created_at: new Date().toISOString() }
+                    ];
+                    localStorage.setItem('ignisense_reports', JSON.stringify(reports));
+                }
+            },
+            getUsers: () => JSON.parse(localStorage.getItem('ignisense_users') || '[]'),
+            addUser: (user) => {
+                const users = DB.getUsers();
+                user.id = Date.now();
+                user.created_at = new Date().toISOString();
+                user.role = 'user';
+                users.push(user);
+                localStorage.setItem('ignisense_users', JSON.stringify(users));
+                return true;
+            },
+            deleteUser: (id) => {
+                let users = DB.getUsers();
+                users = users.filter(u => u.id != id);
+                localStorage.setItem('ignisense_users', JSON.stringify(users));
+            },
+            getReports: () => JSON.parse(localStorage.getItem('ignisense_reports') || '[]'),
+            addReport: (report) => {
+                const reports = DB.getReports();
+                report.id = Date.now();
+                report.created_at = new Date().toISOString();
+                reports.unshift(report); // Add to top
+                localStorage.setItem('ignisense_reports', JSON.stringify(reports));
+            },
+            deleteReport: (id) => {
+                let reports = DB.getReports();
+                reports = reports.filter(r => r.id != id);
+                localStorage.setItem('ignisense_reports', JSON.stringify(reports));
+            }
+        };
+
+        // --- ICONS & MAP HELPERS ---
+        const Icons = {
+            user: L.divIcon({ html: `<div class="relative"><div class="animate-ping absolute h-full w-full rounded-full bg-amber-500 opacity-20"></div><svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-500 fill-black"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div>`, className: 'bg-transparent', iconSize: [30, 30], iconAnchor: [15, 30] }),
+            system: L.divIcon({ html: `<div class="relative"><div class="animate-ping absolute h-full w-full rounded-full bg-red-600 opacity-40"></div><svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-red-600 fill-black drop-shadow-lg"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></div>`, className: 'bg-transparent', iconSize: [30, 30], iconAnchor: [15, 30] }),
+            getIntensityIcon: (type, intensity) => {
+                let color = 'text-red-500';
+                if(intensity === 'low') color = 'text-green-500';
+                if(intensity === 'medium') color = 'text-amber-500';
+                return L.divIcon({
+                    html: `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="${color} fill-black drop-shadow-md"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+                    className: 'bg-transparent', iconSize: [30, 30], iconAnchor: [15, 30]
+                });
+            }
+        };
+
+        // --- APPLICATION CONTROLLER ---
+        const app = {
+            state: {
+                currentUser: null,
+                maps: {},
+                currentReportMarker: null,
+                selectedIntensity: null
+            },
+            
+            init: () => {
+                DB.init();
+                lucide.createIcons();
+                app.initCanvas();
+                
+                // Check Session
+                const sess = sessionStorage.getItem('ignisense_session');
+                if(sess) {
+                    app.state.currentUser = JSON.parse(sess);
+                    app.router.navigate(app.state.currentUser.role === 'admin' ? 'admin' : 'user');
+                } else {
+                    app.router.navigate('login');
+                }
+
+                // Event Listeners
+                document.getElementById('login-form').onsubmit = app.auth.login;
+                document.getElementById('register-form').onsubmit = app.auth.register;
+            },
+            
+            initCanvas: () => {
+                const canvas = document.getElementById('bg-canvas');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                let particles = [];
+                
+                function resize() { 
+                    canvas.width = canvas.parentElement.offsetWidth; 
+                    canvas.height = canvas.parentElement.offsetHeight; 
+                }
+                window.addEventListener('resize', resize);
+                resize();
+                
+                for(let i=0; i<40; i++) {
+                    particles.push({
+                        x: Math.random()*canvas.width, 
+                        y: Math.random()*canvas.height, 
+                        vx: (Math.random()-0.5) * 0.5, 
+                        vy: (Math.random()-0.5) * 0.5, 
+                        r: Math.random()*2
+                    });
+                }
+                
+                function animate() {
+                    ctx.clearRect(0,0,canvas.width,canvas.height);
+                    particles.forEach(p => {
+                        p.x+=p.vx; p.y+=p.vy;
+                        if(p.x<0||p.x>canvas.width) p.vx*=-1; 
+                        if(p.y<0||p.y>canvas.height) p.vy*=-1;
+                        ctx.beginPath(); 
+                        ctx.arc(p.x,p.y,p.r,0,Math.PI*2); 
+                        ctx.fillStyle='rgba(220, 38, 38, 0.4)'; // Red particles
+                        ctx.fill();
+                    });
+                    requestAnimationFrame(animate);
+                }
+                animate();
+            },
+
+            ui: {
+                showModal: ({ title, message, type, onConfirm }) => {
+                    const overlay = document.getElementById('modal-overlay');
+                    const iconContainer = document.getElementById('modal-icon');
+                    const stripe = document.getElementById('modal-stripe');
+                    const actions = document.getElementById('modal-actions');
+                    
+                    document.getElementById('modal-title').innerText = title;
+                    document.getElementById('modal-msg').innerText = message;
+                    
+                    actions.innerHTML = '';
+
+                    if (type === 'confirm' || type === 'danger') {
+                        // Icon & Colors
+                        iconContainer.innerHTML = `<i data-lucide="alert-triangle" class="text-red-500 w-8 h-8"></i>`;
+                        iconContainer.className = "w-16 h-16 rounded-full bg-red-900/20 flex items-center justify-center mb-6 mx-auto border border-red-900/50";
+                        stripe.className = "h-1 w-full bg-gradient-to-r from-red-600 via-orange-500 to-red-600";
+
+                        // Buttons
+                        const cancel = document.createElement('button');
+                        cancel.className = "px-4 py-2 text-gray-400 hover:text-white rounded hover:bg-white/5 transition-colors";
+                        cancel.innerText = "CANCEL";
+                        cancel.onclick = () => overlay.classList.add('hidden');
+                        
+                        const confirm = document.createElement('button');
+                        confirm.className = "px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded font-bold shadow-lg shadow-red-900/30 transition-all";
+                        confirm.innerText = "CONFIRM";
+                        confirm.onclick = () => {
+                            if(onConfirm) onConfirm();
+                            overlay.classList.add('hidden');
+                        };
+                        
+                        actions.appendChild(cancel);
+                        actions.appendChild(confirm);
+                    } else if (type === 'success') {
+                         // Icon & Colors
+                        iconContainer.innerHTML = `<i data-lucide="check" class="text-green-500 w-8 h-8"></i>`;
+                        iconContainer.className = "w-16 h-16 rounded-full bg-green-900/20 flex items-center justify-center mb-6 mx-auto border border-green-900/50";
+                        stripe.className = "h-1 w-full bg-gradient-to-r from-green-600 via-emerald-500 to-green-600";
+                        
+                        const close = document.createElement('button');
+                        close.className = "px-6 py-2 bg-green-700 hover:bg-green-600 text-white rounded font-bold shadow-lg shadow-green-900/30 transition-all";
+                        close.innerText = "ACKNOWLEDGE";
+                        close.onclick = () => overlay.classList.add('hidden');
+                        actions.appendChild(close);
+                    }
+                    
+                    overlay.classList.remove('hidden');
+                    lucide.createIcons();
+                }
+            },
+
+            router: {
+                navigate: (viewId) => {
+                    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+                    const view = document.getElementById(`view-${viewId}`);
+                    view.classList.add('active');
+                    if (viewId === 'user') view.classList.add('active'); // Ensure scrollable class helper if used
+                    
+                    if(viewId === 'admin') app.admin.init();
+                    if(viewId === 'user') app.user.init();
+                    lucide.createIcons();
+                }
+            },
+
+            auth: {
+                login: (e) => {
+                    e.preventDefault();
+                    const email = document.getElementById('login-email').value;
+                    const pass = document.getElementById('login-pass').value;
+                    const users = DB.getUsers();
+                    
+                    const user = users.find(u => u.email === email && u.password === pass);
+                    if(user) {
+                        app.state.currentUser = user;
+                        sessionStorage.setItem('ignisense_session', JSON.stringify(user));
+                        app.router.navigate(user.role === 'admin' ? 'admin' : 'user');
+                    } else {
+                        document.getElementById('login-error').classList.remove('hidden');
+                    }
+                },
+                register: (e) => {
+                    e.preventDefault();
+                    const name = document.getElementById('reg-name').value;
+                    const email = document.getElementById('reg-email').value;
+                    const pass = document.getElementById('reg-pass').value;
+                    const confirm = document.getElementById('reg-confirm').value;
+
+                    if(pass !== confirm) {
+                        document.getElementById('reg-error-msg').textContent = "Passwords do not match";
+                        document.getElementById('reg-error').classList.remove('hidden');
+                        return;
+                    }
+
+                    const users = DB.getUsers();
+                    if(users.find(u => u.email === email)) {
+                        document.getElementById('reg-error-msg').textContent = "Email already exists";
+                        document.getElementById('reg-error').classList.remove('hidden');
+                        return;
+                    }
+
+                    DB.addUser({ name, email, password: pass });
+                    alert("Account created! Please login.");
+                    app.router.navigate('login');
+                },
+                logout: () => {
+                    app.ui.showModal({
+                        title: "TERMINATE SESSION?",
+                        message: "You are about to disconnect from the secure network. Re-authentication will be required.",
+                        type: 'danger',
+                        onConfirm: () => {
+                            sessionStorage.removeItem('ignisense_session');
+                            app.state.currentUser = null;
+                            app.router.navigate('login');
+                        }
+                    });
+                }
+            },
+
+            admin: {
+                init: () => {
+                    // Initialize Map if not exists
+                    if(!app.state.maps.admin) {
+                        const map = L.map('admin-map').setView([14.0855, 121.1475], 13);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                        app.state.maps.admin = map;
+                    }
+                    setTimeout(() => app.state.maps.admin.invalidateSize(), 100);
+                    app.admin.renderDashboard();
+                },
+                switchTab: (tab) => {
+                    document.querySelectorAll('.admin-subview').forEach(el => el.classList.add('hidden'));
+                    document.getElementById(`admin-view-${tab}`).classList.remove('hidden');
+                    
+                    // Reset tab styles
+                    document.getElementById('admin-tab-dashboard').className = "w-full flex items-center gap-3 text-gray-400 hover:text-white px-4 py-3 rounded-r-lg text-sm font-medium";
+                    document.getElementById('admin-tab-users').className = "w-full flex items-center gap-3 text-gray-400 hover:text-white px-4 py-3 rounded-r-lg text-sm font-medium";
+                    
+                    // Active style
+                    const activeClass = "w-full flex items-center gap-3 text-red-400 bg-red-900/10 border-l-2 border-red-500 px-4 py-3 rounded-r-lg text-sm font-medium";
+                    document.getElementById(`admin-tab-${tab}`).className = activeClass;
+
+                    if(tab === 'dashboard') app.admin.renderDashboard();
+                    if(tab === 'users') app.admin.renderUsers();
+                    lucide.createIcons();
+                },
+                renderDashboard: () => {
+                    const reports = DB.getReports();
+                    const map = app.state.maps.admin;
+                    
+                    // Clear markers
+                    map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
+
+                    let total=0, userR=0, sysR=0;
+                    const list = document.getElementById('admin-report-list');
+                    list.innerHTML = '';
+
+                    reports.forEach(r => {
+                        total++;
+                        r.type === 'user' ? userR++ : sysR++;
+                        
+                        L.marker([r.lat, r.lng], {
+                            icon: Icons.getIntensityIcon(r.type, r.intensity)
+                        }).addTo(map).bindPopup(`<b>${r.location_name}</b><br>Intensity: ${r.intensity}`);
+
+                        const div = document.createElement('div');
+                        div.className = "bg-black/40 p-3 rounded border border-white/5 flex justify-between items-center text-xs";
+                        div.innerHTML = `
+                            <div>
+                                <div class="font-bold ${r.type==='system'?'text-red-500':'text-amber-500'}">${r.type.toUpperCase()} ALERT</div>
+                                <div class="text-gray-500">${r.location_name}</div>
+                            </div>
+                            <button onclick="app.admin.deleteReport(${r.id})" class="text-gray-600 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        `;
+                        list.appendChild(div);
+                    });
+
+                    document.getElementById('stat-total').innerText = total;
+                    document.getElementById('stat-user').innerText = userR;
+                    document.getElementById('stat-system').innerText = sysR;
+                    lucide.createIcons();
+                },
+                renderUsers: () => {
+                    const users = DB.getUsers();
+                    const tbody = document.getElementById('admin-users-list');
+                    tbody.innerHTML = '';
+                    users.forEach(u => {
+                        tbody.innerHTML += `
+                            <tr class="hover:bg-white/5 border-b border-white/5">
+                                <td class="px-6 py-4 text-white font-medium">${u.name}</td>
+                                <td class="px-6 py-4 text-gray-500 font-mono">${u.email}</td>
+                                <td class="px-6 py-4"><span class="px-2 py-0.5 rounded border border-gray-700 text-xs uppercase">${u.role}</span></td>
+                                <td class="px-6 py-4 text-right">
+                                    ${u.role !== 'admin' ? `<button onclick="app.admin.deleteUser(${u.id})" class="text-red-500 hover:text-white hover:bg-red-600 px-3 py-1 rounded text-xs">REVOKE</button>` : ''}
+                                </td>
+                            </tr>
+                        `;
+                    });
+                },
+                deleteReport: (id) => {
+                    if(confirm("Delete this report?")) {
+                        DB.deleteReport(id);
+                        app.admin.renderDashboard();
+                    }
+                },
+                deleteUser: (id) => {
+                    if(confirm("Revoke access for this user?")) {
+                        DB.deleteUser(id);
+                        app.admin.renderUsers();
+                    }
+                }
+            },
+
+            user: {
+                init: () => {
+                    document.getElementById('user-name-display').textContent = app.state.currentUser.name;
+                    if(!app.state.maps.user) {
+                        const map = L.map('user-map').setView([14.0855, 121.1475], 13);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                        app.state.maps.user = map;
+
+                        map.on('click', (e) => {
+                            if(app.state.currentReportMarker) map.removeLayer(app.state.currentReportMarker);
+                            app.state.currentReportMarker = L.marker(e.latlng, { draggable: true, icon: Icons.user }).addTo(map);
+                            app.user.updateCoords(e.latlng);
+                        });
+                    }
+                    setTimeout(() => app.state.maps.user.invalidateSize(), 100);
+                    app.user.loadReports();
+                },
+                loadReports: () => {
+                    const map = app.state.maps.user;
+                    // Keep user marker, remove others
+                    map.eachLayer(l => { 
+                        if(l instanceof L.Marker && l !== app.state.currentReportMarker) map.removeLayer(l); 
+                    });
+
+                    const reports = DB.getReports();
+                    reports.forEach(r => {
+                         L.marker([r.lat, r.lng], { icon: Icons.getIntensityIcon(r.type, r.intensity) })
+                          .addTo(map).bindPopup(`<b>${r.type.toUpperCase()} ALERT</b><br>${r.location_name}`);
+                    });
+                },
+                search: async () => {
+                    const query = document.getElementById('map-search').value;
+                    if(query.length < 3) return;
+                    // Simple mock search or basic Nominatim
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${query}+Tanauan&format=json&limit=3`);
+                    const data = await res.json();
+                    const results = document.getElementById('search-results');
+                    results.innerHTML = '';
+                    results.classList.remove('hidden');
+                    
+                    data.forEach(place => {
+                        const div = document.createElement('div');
+                        div.className = 'search-item';
+                        div.innerText = place.display_name;
+                        div.onclick = () => {
+                            const latlng = { lat: parseFloat(place.lat), lng: parseFloat(place.lon) };
+                            app.state.maps.user.setView(latlng, 16);
+                            if(app.state.currentReportMarker) app.state.maps.user.removeLayer(app.state.currentReportMarker);
+                            app.state.currentReportMarker = L.marker(latlng, {draggable:true, icon: Icons.user}).addTo(app.state.maps.user);
+                            app.user.updateCoords(latlng);
+                            results.classList.add('hidden');
+                        };
+                        results.appendChild(div);
+                    });
+                },
+                updateCoords: (latlng) => {
+                    document.getElementById('lat-lng-display').innerText = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+                    document.getElementById('lat-lng-display').classList.add('text-red-500');
+                    app.user.checkForm();
+                },
+                setIntensity: (level) => {
+                    app.state.selectedIntensity = level;
+                    document.querySelectorAll('.intensity-btn').forEach(b => b.classList.remove('ring-2', 'ring-white', 'opacity-100'));
+                    document.getElementById(`int-${level === 'medium' ? 'med' : level}`).classList.add('ring-2', 'ring-white', 'opacity-100');
+                    app.user.checkForm();
+                },
+                checkForm: () => {
+                    const btn = document.getElementById('submit-btn');
+                    if(app.state.currentReportMarker && app.state.selectedIntensity) btn.disabled = false;
+                    else btn.disabled = true;
+                },
+                submitReport: () => {
+                    app.ui.showModal({
+                        title: "CONFIRM TRANSMISSION",
+                        message: "Are you sure you want to broadcast this emergency alert to the Command Center?",
+                        type: 'danger',
+                        onConfirm: () => {
+                            app.user.executeSubmission();
+                        }
+                    });
+                },
+                executeSubmission: () => {
+                    const coords = app.state.currentReportMarker.getLatLng();
+                    DB.addReport({
+                        type: 'user',
+                        lat: coords.lat,
+                        lng: coords.lng,
+                        location_name: `Report (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`,
+                        intensity: app.state.selectedIntensity
+                    });
+                    
+                    // Show success modal
+                    app.ui.showModal({
+                        title: "TRANSMISSION SUCCESS",
+                        message: "Emergency report sent to Command Center.",
+                        type: 'success'
+                    });
+                    
+                    // Reset
+                    app.state.maps.user.removeLayer(app.state.currentReportMarker);
+                    app.state.currentReportMarker = null;
+                    app.state.selectedIntensity = null;
+                    document.querySelectorAll('.intensity-btn').forEach(b => b.classList.remove('ring-2', 'ring-white', 'opacity-100'));
+                    document.getElementById('lat-lng-display').innerText = "- - . - - , - - . - -";
+                    document.getElementById('submit-btn').disabled = true;
+                    
+                    app.user.loadReports();
+                }
+            }
+        };
+
+        // Initialize App
+        window.onload = app.init;
+
+        // Hide search on click outside
+        document.onclick = (e) => {
+            if (!e.target.closest('#map-search')) document.getElementById('search-results').classList.add('hidden');
+        };
+
+    </script>
+</body>
+</html>
